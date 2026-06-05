@@ -20,11 +20,9 @@ from utils import (
     detect_up,
     filter_ball_pos_by_roi,
     get_active_roi,
-    get_ball_track_zone,
     get_device,
     get_rim_bounds,
     get_up_frame_index,
-    had_up_phase,
     in_active_roi,
     in_ball_track_zone,
     normalize_roi,
@@ -36,7 +34,6 @@ BALL_COLOR = (0, 0, 255)
 HOOP_COLOR = (0, 255, 255)
 ROI_COLOR = (0, 220, 255)
 TRAJECTORY_COLOR = (0, 140, 255)
-TRACK_ZONE_COLOR = (120, 120, 255)
 SHOT_COOLDOWN_S = 3.0
 SHOOTING_TIMEOUT_S = 4.0
 
@@ -128,12 +125,6 @@ def _draw_roi(
         2,
         cv2.LINE_AA,
     )
-
-    track_zone = get_ball_track_zone(hoop_pos, custom_roi, frame.shape[1], frame.shape[0])
-    if track_zone is not None and custom_roi is not None:
-        tx1, ty1, tx2, ty2 = track_zone
-        cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), TRACK_ZONE_COLOR, 1, cv2.LINE_AA)
-
 
 def _draw_trajectory(
     frame: np.ndarray,
@@ -273,6 +264,8 @@ def analyze_video(
             break
 
         results = model(frame, stream=True, device=device, verbose=False)
+        hoop_candidates: list[dict] = []
+        ball_candidates: list[dict] = []
         for r in results:
             for box in r.boxes:
                 x1, y1, x2, y2 = box.xyxy[0]
@@ -286,50 +279,90 @@ def analyze_video(
                 if conf > 0.5 and current_class == "Basketball Hoop":
                     if roi_ready and not in_active_roi(center, custom_roi=custom_roi):
                         continue
-                    hoop_pos.append((center, frame_count, w, h, conf))
-                    _draw_box_label(
-                        frame,
-                        x1,
-                        y1,
-                        w,
-                        h,
-                        f"Hoop {conf:.0%}",
-                        HOOP_COLOR,
+                    hoop_candidates.append(
+                        {
+                            "x1": x1,
+                            "y1": y1,
+                            "w": w,
+                            "h": h,
+                            "conf": conf,
+                            "center": center,
+                        }
                     )
+                    continue
 
                 if current_class == "Basketball":
-                    if roi_ready and not in_ball_track_zone(
-                        center,
-                        hoop_pos=hoop_pos,
-                        custom_roi=custom_roi,
-                        frame_width=width,
-                        frame_height=height,
-                    ):
-                        continue
-                    if not roi_ready and len(hoop_pos) > 0 and not in_ball_track_zone(
-                        center,
-                        hoop_pos=hoop_pos,
-                        custom_roi=custom_roi,
-                        frame_width=width,
-                        frame_height=height,
-                    ):
-                        continue
+                    ball_candidates.append(
+                        {
+                            "x1": x1,
+                            "y1": y1,
+                            "w": w,
+                            "h": h,
+                            "conf": conf,
+                            "center": center,
+                        }
+                    )
 
-                    min_conf = 0.15 if roi_ready or (
-                        len(hoop_pos) > 0
-                        and in_active_roi(center, hoop_pos=hoop_pos, custom_roi=custom_roi)
-                    ) else 0.3
-                    if conf >= min_conf:
-                        ball_pos.append((center, frame_count, w, h, conf))
-                        _draw_box_label(
-                            frame,
-                            x1,
-                            y1,
-                            w,
-                            h,
-                            f"Ball {conf:.0%}",
-                            BALL_COLOR,
-                        )
+        # Auto-select a single primary hoop each frame: largest area with confidence weight.
+        if hoop_candidates:
+            primary_hoop = max(
+                hoop_candidates,
+                key=lambda c: (c["w"] * c["h"] * c["conf"], c["conf"]),
+            )
+            hoop_pos.append(
+                (
+                    primary_hoop["center"],
+                    frame_count,
+                    primary_hoop["w"],
+                    primary_hoop["h"],
+                    primary_hoop["conf"],
+                )
+            )
+            _draw_box_label(
+                frame,
+                primary_hoop["x1"],
+                primary_hoop["y1"],
+                primary_hoop["w"],
+                primary_hoop["h"],
+                f"Hoop {primary_hoop['conf']:.0%}",
+                HOOP_COLOR,
+            )
+
+        for ball in ball_candidates:
+            center = ball["center"]
+            conf = ball["conf"]
+            if roi_ready and not in_ball_track_zone(
+                center,
+                hoop_pos=hoop_pos,
+                custom_roi=custom_roi,
+                frame_width=width,
+                frame_height=height,
+            ):
+                continue
+            if not roi_ready and len(hoop_pos) > 0 and not in_ball_track_zone(
+                center,
+                hoop_pos=hoop_pos,
+                custom_roi=custom_roi,
+                frame_width=width,
+                frame_height=height,
+            ):
+                continue
+
+            min_conf = 0.15 if roi_ready or (
+                len(hoop_pos) > 0
+                and in_active_roi(center, hoop_pos=hoop_pos, custom_roi=custom_roi)
+            ) else 0.3
+            if conf >= min_conf:
+                ball_pos.append((center, frame_count, ball["w"], ball["h"], conf))
+                _draw_box_label(
+                    frame,
+                    ball["x1"],
+                    ball["y1"],
+                    ball["w"],
+                    ball["h"],
+                    f"Ball {conf:.0%}",
+                    BALL_COLOR,
+                )
 
         ball_pos = clean_ball_pos(
             ball_pos, frame_count, hoop_pos, custom_roi, width, height

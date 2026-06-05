@@ -14,6 +14,10 @@ https://github.com/avishah3/AI-Basketball-Shot-Detector-Tracker/assets/115107522
 - [**第 1 天起步（Xcode 已装好从这里开始）**](ios-starter/START-HERE.md)
 - [iOS 工程交接文档（算法摘要、模型转换、文件清单）](docs/iOS-PROJECT-HANDOFF.md)
 
+## 版本更新记录（2026-06-05）
+- 使用自动 ROI 作为检测区域，不再依赖手动框选。
+- 在多篮筐场景中自动选择画面中面积最大、最接近镜头的篮筐作为主目标，并排除其他干扰篮筐。
+
 ## 项目简介
 
 本项目结合了机器学习和计算机视觉的强大功能，旨在实时检测和分析篮球投篮！基于最新的YOLOv8（You Only Look Once）机器学习模型和OpenCV库，程序可以处理来自各种来源的视频流，如实时摄像头或预录制的视频，为用户提供一种身临其境的游戏体验，并增强比赛分析能力。

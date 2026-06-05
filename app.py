@@ -44,6 +44,50 @@ def _clips_dir(job_id: str) -> Path:
     return OUTPUT_DIR / job_id / "clips"
 
 
+def _enqueue_job(
+    *,
+    input_path: Path,
+    output_path: Path,
+    filename: str,
+    custom_roi: tuple[int, int, int, int] | None,
+    use_net_swish: bool,
+    clip_before_s: float,
+    clip_after_s: float,
+) -> str:
+    job_id = uuid.uuid4().hex
+    with jobs_lock:
+        jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "progress": 0,
+            "filename": filename,
+            "created_at": _utc_now(),
+            "preview_ready": False,
+            "live_stats": {
+                "makes": 0,
+                "attempts": 0,
+                "overlay_text": "Waiting...",
+                "frame": 0,
+            },
+        }
+
+    thread = threading.Thread(
+        target=_run_job,
+        args=(
+            job_id,
+            input_path,
+            output_path,
+            custom_roi,
+            use_net_swish,
+            clip_before_s,
+            clip_after_s,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    return job_id
+
+
 def _run_job(
     job_id: str,
     input_path: Path,
@@ -191,37 +235,15 @@ async def analyze(
     with input_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    with jobs_lock:
-        jobs[job_id] = {
-            "id": job_id,
-            "status": "queued",
-            "progress": 0,
-            "filename": file.filename,
-            "created_at": _utc_now(),
-            "preview_ready": False,
-            "live_stats": {
-                "makes": 0,
-                "attempts": 0,
-                "overlay_text": "Waiting...",
-                "frame": 0,
-            },
-        }
-
-    thread = threading.Thread(
-        target=_run_job,
-        args=(
-            job_id,
-            input_path,
-            output_path,
-            custom_roi,
-            use_net_swish,
-            clip_before_s,
-            clip_after_s,
-        ),
-        daemon=True,
+    job_id = _enqueue_job(
+        input_path=input_path,
+        output_path=output_path,
+        filename=file.filename,
+        custom_roi=custom_roi,
+        use_net_swish=use_net_swish,
+        clip_before_s=clip_before_s,
+        clip_after_s=clip_after_s,
     )
-    thread.start()
-
     return {"job_id": job_id}
 
 

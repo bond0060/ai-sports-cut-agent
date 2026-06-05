@@ -53,6 +53,7 @@ const dockCloseBtn = document.getElementById("dock-close-btn");
 const downloadAllClips = document.getElementById("download-all-clips");
 
 const CLIP_SETTINGS_KEY = "basketball_clip_settings";
+const USE_AUTO_ROI_FOR_TEST = true;
 
 let currentFile = null;
 let pollTimer = null;
@@ -569,7 +570,7 @@ async function openRoiSetup() {
 }
 
 async function startAnalysis() {
-  if (!currentFile || !selectedRoi) {
+  if (!currentFile) {
     return;
   }
 
@@ -585,10 +586,12 @@ async function startAnalysis() {
 
   const formData = new FormData();
   formData.append("file", currentFile);
-  formData.append("roi_x1", selectedRoi.x1);
-  formData.append("roi_y1", selectedRoi.y1);
-  formData.append("roi_x2", selectedRoi.x2);
-  formData.append("roi_y2", selectedRoi.y2);
+  if (selectedRoi && !USE_AUTO_ROI_FOR_TEST) {
+    formData.append("roi_x1", selectedRoi.x1);
+    formData.append("roi_y1", selectedRoi.y1);
+    formData.append("roi_x2", selectedRoi.x2);
+    formData.append("roi_y2", selectedRoi.y2);
+  }
   formData.append("has_net", hasNetInput && hasNetInput.checked ? "true" : "false");
   const clipSettings = getClipSettings();
   formData.append("clip_before", clipSettings.before);
@@ -654,7 +657,15 @@ clearFileBtn.addEventListener("click", () => {
   resetUI();
 });
 
-analyzeBtn.addEventListener("click", openRoiSetup);
+if (USE_AUTO_ROI_FOR_TEST) {
+  analyzeBtn.textContent = "开始分析（自动 ROI）";
+  analyzeBtn.addEventListener("click", () => {
+    selectedRoi = null;
+    startAnalysis();
+  });
+} else {
+  analyzeBtn.addEventListener("click", openRoiSetup);
+}
 resetRoiBtn.addEventListener("click", () => {
   if (roiSelector) {
     roiSelector.reset();

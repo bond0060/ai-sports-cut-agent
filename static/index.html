@@ -12,7 +12,7 @@
       <div class="hero-badge">YOLOv8 + OpenCV</div>
       <h1>篮球投篮检测</h1>
       <p class="hero-subtitle">
-        上传视频后手动框选观察区域，聚焦篮筐附近干净背景，提升复杂场景检测准确率。
+        上传视频后自动根据篮筐位置生成 ROI，按固定比例规范检测区域，提升不同测试视频的可比性。
       </p>
     </header>
 
@@ -31,7 +31,7 @@
           <button id="clear-file" type="button" class="text-btn">移除</button>
         </div>
 
-        <button id="analyze-btn" type="button" class="primary-btn" disabled>下一步：选择观察区域</button>
+        <button id="analyze-btn" type="button" class="primary-btn" disabled>开始分析（自动 ROI）</button>
       </section>
 
       <section id="roi-section" class="card hidden">
