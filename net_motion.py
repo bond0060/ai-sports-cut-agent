@@ -26,8 +26,9 @@ def get_net_roi(
     rim_y, rim_x1, rim_x2, rim_bottom = get_rim_bounds(hoop_pos)
 
     half_net_w = max(int(0.45 * w), 12)
-    net_top = int(rim_y + 0.05 * h)
-    net_bottom = int(rim_bottom + 0.95 * h)
+    # Use a tighter, physically plausible net region to reduce background motion noise.
+    net_top = int(rim_y + 0.08 * h)
+    net_bottom = int(rim_bottom + 0.20 * h)
 
     x1 = int(cx - half_net_w)
     x2 = int(cx + half_net_w)

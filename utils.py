@@ -55,12 +55,14 @@ def get_hoop_roi(hoop_pos):
     half_w = HOOP_ROI_X_SCALE * w / 2
     half_h = HOOP_ROI_Y_SCALE * h / 2
     up_extra = HOOP_ROI_UP_EXTRA * h
+    # Align auto ROI bottom with current net ROI bottom: rim_bottom + 0.20 * h.
+    roi_bottom = cy + 0.7 * h
 
     return (
         int(cx - half_w),
         int(cy - half_h - up_extra),
         int(cx + half_w),
-        int(cy + half_h),
+        int(roi_bottom),
     )
 
 
