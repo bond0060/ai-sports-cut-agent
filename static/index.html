@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>篮球投篮检测</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-badge">YOLOv8 + OpenCV</div>
+      <h1>篮球投篮检测</h1>
+      <p class="hero-subtitle">
+        上传视频后手动框选观察区域，聚焦篮筐附近干净背景，提升复杂场景检测准确率。
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="card upload-card">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="上传视频">
+          <div class="dropzone-icon">🏀</div>
+          <h2>拖拽视频到此处</h2>
+          <p>或点击选择文件</p>
+          <p class="hint">支持 MP4 / MOV / AVI / MKV / WEBM / M4V</p>
+          <input id="file-input" type="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v" hidden />
+        </div>
+
+        <div id="selected-file" class="selected-file hidden">
+          <span id="file-name"></span>
+          <button id="clear-file" type="button" class="text-btn">移除</button>
+        </div>
+
+        <button id="analyze-btn" type="button" class="primary-btn" disabled>下一步：选择观察区域</button>
+      </section>
+
+      <section id="roi-section" class="card hidden">
+        <div class="section-header">
+          <h2>选择观察区域 (ROI)</h2>
+        </div>
+        <p class="roi-tip">
+          拖动黄框移动位置，拖角点调整大小。尽量只覆盖篮筐及上方入球空间，避开球员、球架等干扰。
+        </p>
+        <div id="roi-editor" class="roi-editor">
+          <canvas id="roi-canvas"></canvas>
+        </div>
+        <div class="net-option">
+          <label class="net-toggle">
+            <input id="has-net-input" type="checkbox" checked />
+            <span>场地有篮网（启用 Net Swish 进球判定）</span>
+          </label>
+          <p class="roi-tip net-hint">
+            有网时：进球需同时满足「轨迹穿筐」+「篮网形变」；可过滤暗光下人头误检。无网场地请关闭此项。
+          </p>
+        </div>
+        <div class="roi-actions">
+          <button id="reset-roi-btn" type="button" class="secondary-btn">重置区域</button>
+          <button id="confirm-roi-btn" type="button" class="primary-btn">确认并开始分析</button>
+        </div>
+        <video id="roi-source-video" class="hidden" playsinline muted></video>
+      </section>
+
+      <section id="player-section" class="card hidden">
+        <div class="section-header">
+          <h2 id="player-title">分析预览</h2>
+          <span id="player-badge" class="live-badge">实时分析中</span>
+        </div>
+
+        <div class="player-shell">
+          <img id="live-preview" class="player-media hidden" alt="实时分析预览" />
+
+          <div id="video-dock-placeholder" class="video-dock-placeholder hidden">
+            <span>视频窗口正在右下角浮动播放</span>
+          </div>
+
+          <div id="video-dock" class="video-dock">
+            <div id="video-dock-bar" class="video-dock-bar hidden">
+              <span id="video-dock-title">标注回放</span>
+              <div class="video-dock-actions">
+                <button id="dock-back-btn" type="button" class="dock-btn" title="回到原位">↩ 原位</button>
+                <button id="dock-close-btn" type="button" class="dock-btn" title="关闭浮窗">✕</button>
+              </div>
+            </div>
+            <video id="result-video" class="player-media hidden" controls playsinline></video>
+            <p id="clip-info" class="clip-info hidden"></p>
+          </div>
+
+          <div class="legend">
+            <span class="legend-item"><i class="dot ball"></i>红色框 · 篮球（ROI 内）</span>
+            <span class="legend-item"><i class="dot hoop"></i>青色框 · 篮筐</span>
+            <span class="legend-item"><i class="dot roi"></i>黄色区域 · 手动 ROI 观察区</span>
+            <span class="legend-item"><i class="dot trail"></i>橙色线 · 球轨迹</span>
+            <span class="legend-item"><i class="dot rim"></i>绿色线 · 筐沿判定线</span>
+            <span class="legend-item"><i class="dot net"></i>橙色框 · 篮网检测区</span>
+          </div>
+        </div>
+
+        <div id="progress-section" class="progress-panel hidden">
+          <div class="progress-row">
+            <span id="progress-label">0%</span>
+            <span id="progress-detail" class="muted">正在加载模型…</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div id="live-stats" class="live-stats hidden">
+          <span>实时比分 <strong id="live-score">0 / 0</strong></span>
+          <span id="live-status" class="muted">Waiting...</span>
+        </div>
+
+        <div id="player-scroll-anchor" aria-hidden="true"></div>
+      </section>
+
+      <section id="error-section" class="card error-card hidden">
+        <h2>分析失败</h2>
+        <p id="error-message"></p>
+      </section>
+
+      <section id="results-section" class="results hidden">
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-label">投篮次数</span>
+            <strong id="stat-attempts" class="stat-value">0</strong>
+          </article>
+          <article class="stat-card make">
+            <span class="stat-label">进球</span>
+            <strong id="stat-makes" class="stat-value">0</strong>
+          </article>
+          <article class="stat-card miss">
+            <span class="stat-label">未进</span>
+            <strong id="stat-misses" class="stat-value">0</strong>
+          </article>
+          <article class="stat-card rate">
+            <span class="stat-label">命中率</span>
+            <strong id="stat-percentage" class="stat-value">0%</strong>
+          </article>
+        </div>
+
+        <div class="card">
+          <div class="section-header shots-header">
+            <h2>逐球记录</h2>
+            <div class="shots-header-actions">
+              <span id="shot-count" class="muted"></span>
+              <button id="clip-settings-toggle" type="button" class="icon-btn" title="片段回放设置" aria-label="片段回放设置">⚙️</button>
+            </div>
+          </div>
+          <div id="clip-settings-panel" class="clip-settings hidden">
+            <label class="clip-field">
+              <span>事件前</span>
+              <input id="clip-before" type="number" min="0" max="30" step="0.5" value="3" />
+              <span>秒</span>
+            </label>
+            <label class="clip-field">
+              <span>事件后</span>
+              <input id="clip-after" type="number" min="0" max="30" step="0.5" value="3" />
+              <span>秒</span>
+            </label>
+            <p class="clip-settings-hint muted">
+              回放与导出片段均使用上述前后时长（基于标注视频）。分析完成后可单条或批量保存到本机。
+            </p>
+            <a id="download-all-clips" class="secondary-btn download-all-btn hidden" href="#" download>
+              ↓ 导出全部片段 (ZIP)
+            </a>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>时间</th>
+                  <th>帧</th>
+                  <th>结果</th>
+                  <th>轨迹</th>
+                  <th>网动</th>
+                  <th>回放</th>
+                  <th>保存</th>
+                </tr>
+              </thead>
+              <tbody id="shots-body"></tbody>
+            </table>
+          </div>
+          <p id="empty-shots" class="muted hidden">未检测到投篮动作</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>单球单筐场景效果最佳 · 分析完成后可回放完整标注视频</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

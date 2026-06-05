@@ -1,0 +1,8 @@
+uploads/
+outputs/
+output_test_5.mp4
+__pycache__/
+*.pyc
+.DS_Store
+
+.venv/

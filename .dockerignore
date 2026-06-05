@@ -1,0 +1,15 @@
+uploads/
+outputs/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.DS_Store
+*.mp4
+*.mov
+*.avi
+output_test_5.mp4
+terminals/
+assets/
+.cursor/
+**/.pytest_cache/
