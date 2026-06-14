@@ -4,6 +4,16 @@ const selectedFile = document.getElementById("selected-file");
 const fileName = document.getElementById("file-name");
 const clearFileBtn = document.getElementById("clear-file");
 const analyzeBtn = document.getElementById("analyze-btn");
+const algorithmOptimizedInput = document.getElementById("algorithm-optimized");
+const algorithmOriginalInput = document.getElementById("algorithm-original");
+const algorithmChoices = document.querySelectorAll(".algorithm-choice");
+const algorithmHint = document.getElementById("algorithm-hint");
+const algorithmBadge = document.getElementById("algorithm-badge");
+const hoopSelectSection = document.getElementById("hoop-select-section");
+const hoopChoiceButtons = document.getElementById("hoop-choice-buttons");
+const hoopPickerCanvas = document.getElementById("hoop-picker-canvas");
+const confirmHoopBtn = document.getElementById("confirm-hoop-btn");
+const cancelHoopBtn = document.getElementById("cancel-hoop-btn");
 
 const roiSection = document.getElementById("roi-section");
 const roiCanvas = document.getElementById("roi-canvas");
@@ -53,6 +63,7 @@ const dockCloseBtn = document.getElementById("dock-close-btn");
 const downloadAllClips = document.getElementById("download-all-clips");
 
 const CLIP_SETTINGS_KEY = "basketball_clip_settings";
+const ALGORITHM_SETTINGS_KEY = "basketball_algorithm";
 const USE_AUTO_ROI_FOR_TEST = true;
 
 let currentFile = null;
@@ -67,6 +78,8 @@ let activeShotRow = null;
 let videoDockObserver = null;
 let floatDismissed = false;
 let dockObserverEnabled = false;
+let selectedTargetHoop = null;
+let hoopPicker = null;
 
 function loadClipSettings() {
   try {
@@ -207,7 +220,79 @@ function playShotClip(shot, rowEl) {
   }
 }
 
+function getSelectedAlgorithm() {
+  return algorithmOriginalInput?.checked ? "original" : "optimized";
+}
+
+function setSelectedAlgorithm(algorithm) {
+  const isOriginal = algorithm === "original";
+  if (algorithmOptimizedInput) {
+    algorithmOptimizedInput.checked = !isOriginal;
+  }
+  if (algorithmOriginalInput) {
+    algorithmOriginalInput.checked = isOriginal;
+  }
+  algorithmChoices.forEach((choice) => {
+    const input = choice.querySelector('input[type="radio"]');
+    choice.classList.toggle("is-active", Boolean(input?.checked));
+  });
+}
+
+function getAlgorithmLabel(algorithm) {
+  return algorithm === "original"
+    ? "原版算法（avishah3 GitHub · 检测全部篮筐）"
+    : "优化版算法（解决多篮筐检测 · 目标区域筛选）";
+}
+
+function syncAlgorithmUi() {
+  const algorithm = getSelectedAlgorithm();
+  const isOriginal = algorithm === "original";
+
+  if (algorithmHint) {
+    algorithmHint.textContent = isOriginal
+      ? "原版：检测画面中所有篮筐，不做目标筛选。适合与优化版做 A/B 对比。"
+      : "优化版（解决多篮筐检测）：与原版检测逻辑相同；多个篮筐时先选定目标区域，区域内检测均视为目标篮筐。";
+  }
+
+  if (hasNetInput) {
+    hasNetInput.disabled = true;
+    hasNetInput.closest(".net-option")?.classList.add("disabled-option");
+  }
+
+  analyzeBtn.textContent = isOriginal ? "开始分析（原版算法）" : "开始分析（优化版）";
+}
+
+function loadAlgorithmSetting() {
+  try {
+    const saved = localStorage.getItem(ALGORITHM_SETTINGS_KEY);
+    if (saved === "original" || saved === "optimized") {
+      setSelectedAlgorithm(saved);
+    }
+  } catch {
+    // ignore
+  }
+  syncAlgorithmUi();
+}
+
+function saveAlgorithmSetting() {
+  localStorage.setItem(ALGORITHM_SETTINGS_KEY, getSelectedAlgorithm());
+}
+
 initClipSettings();
+loadAlgorithmSetting();
+
+algorithmChoices.forEach((choice) => {
+  choice.addEventListener("click", () => {
+    const input = choice.querySelector('input[type="radio"]');
+    if (!input) {
+      return;
+    }
+    input.checked = true;
+    setSelectedAlgorithm(input.value);
+    saveAlgorithmSetting();
+    syncAlgorithmUi();
+  });
+});
 
 clipSettingsToggle.addEventListener("click", () => {
   clipSettingsPanel.classList.toggle("hidden");
@@ -245,12 +330,15 @@ function resetUI() {
   hide(livePreview);
   hide(resultVideo);
   hide(roiSection);
+  hide(hoopSelectSection);
   progressFill.style.width = "0%";
   progressLabel.textContent = "0%";
   selectedRoi = null;
+  selectedTargetHoop = null;
   currentResult = null;
   currentJobId = null;
   hide(downloadAllClips);
+  hide(algorithmBadge);
   teardownVideoDockObserver();
   setVideoFloating(false);
   floatDismissed = false;
@@ -545,35 +633,303 @@ class RoiSelector {
   }
 }
 
-async function openRoiSetup() {
-  if (!currentFile) {
-    return;
+class HoopPicker {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.hoops = [];
+    this.selectedId = null;
+    this.image = new Image();
+    this.scaleX = 1;
+    this.scaleY = 1;
+    this.onSelect = null;
+    this.onClick = this.onClick.bind(this);
+    canvas.addEventListener("click", this.onClick);
   }
 
-  hide(errorSection);
-  hide(resultsSection);
-  hide(playerSection);
-  show(roiSection);
-
-  if (!roiSelector) {
-    roiSelector = new RoiSelector(roiCanvas, roiSourceVideo);
+  drawCheckmark(ctx, cx, cy, size, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(3.5, size * 0.16);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.24, cy + size * 0.02);
+    ctx.lineTo(cx - size * 0.04, cy + size * 0.24);
+    ctx.lineTo(cx + size * 0.28, cy - size * 0.2);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  try {
-    confirmRoiBtn.disabled = true;
-    await roiSelector.loadFile(currentFile);
-    selectedRoi = roiSelector.toNativeRect();
-    confirmRoiBtn.disabled = false;
-  } catch (error) {
-    showError(error.message);
+  drawLabel(ctx, text, x, y, bgColor, textColor) {
+    ctx.font = "bold 15px -apple-system, BlinkMacSystemFont, sans-serif";
+    const paddingX = 10;
+    const paddingY = 6;
+    const metrics = ctx.measureText(text);
+    const boxW = metrics.width + paddingX * 2;
+    const boxH = 24;
+    const boxX = x;
+    const boxY = y - boxH + 4;
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, boxX + paddingX, boxY + boxH - paddingY);
+  }
+
+  selectHoop(hoopId) {
+    this.selectedId = hoopId;
+    this.draw();
+    const hoop = this.getSelected();
+    if (hoop && this.onSelect) {
+      this.onSelect(hoop);
+    }
+    renderHoopChoiceButtons();
+  }
+
+  getCheckButtonRect(hoop) {
+    const rect = this.toDisplayRect(hoop);
+    const size = 42;
+    const x = rect.x + rect.w / 2 - size / 2;
+    const y = Math.max(rect.y - size - 12, 8);
+    return { x, y, w: size, h: size };
+  }
+
+  load(previewBase64, hoops) {
+    return new Promise((resolve, reject) => {
+      this.hoops = hoops;
+      this.selectedId = hoops.length === 1 ? hoops[0].id : null;
+      this.image.onload = () => {
+        const maxWidth = this.canvas.parentElement.clientWidth || 960;
+        const scale = Math.min(1, maxWidth / this.image.width);
+        this.canvas.width = Math.round(this.image.width * scale);
+        this.canvas.height = Math.round(this.image.height * scale);
+        this.scaleX = this.image.width / this.canvas.width;
+        this.scaleY = this.image.height / this.canvas.height;
+        this.draw();
+        resolve();
+      };
+      this.image.onerror = () => reject(new Error("无法加载篮筐预览图"));
+      this.image.src = `data:image/jpeg;base64,${previewBase64}`;
+    });
+  }
+
+  toDisplayRect(hoop) {
+    return {
+      x: hoop.x1 / this.scaleX,
+      y: hoop.y1 / this.scaleY,
+      w: hoop.w / this.scaleX,
+      h: hoop.h / this.scaleY,
+    };
+  }
+
+  draw() {
+    const { ctx, canvas, image } = this;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    for (const hoop of this.hoops) {
+      const rect = this.toDisplayRect(hoop);
+      const selected = hoop.id === this.selectedId;
+      const accent = selected ? "#00ff78" : "#ffd400";
+      const accentSoft = selected ? "rgba(0, 255, 120, 0.24)" : "rgba(255, 212, 0, 0.18)";
+
+      ctx.fillStyle = accentSoft;
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = selected ? 4 : 3;
+      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+      const label = selected
+        ? `目标区域 ${Math.round(hoop.conf * 100)}%`
+        : `篮筐 ${Math.round(hoop.conf * 100)}%`;
+      this.drawLabel(
+        ctx,
+        label,
+        rect.x + 6,
+        Math.max(rect.y + 4, 18),
+        selected ? "rgba(0, 255, 120, 0.92)" : "rgba(255, 212, 0, 0.92)",
+        selected ? "#0f1419" : "#1a1200"
+      );
+
+      const btn = this.getCheckButtonRect(hoop);
+      const btnCx = btn.x + btn.w / 2;
+      const btnCy = btn.y + btn.h / 2;
+      const btnRadius = btn.w / 2;
+
+      ctx.save();
+      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 2;
+      ctx.beginPath();
+      ctx.arc(btnCx, btnCy, btnRadius, 0, Math.PI * 2);
+      ctx.fillStyle = selected ? "#00ff78" : "#ffffff";
+      ctx.fill();
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(btnCx, btnCy, btnRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = selected ? "#00ff78" : "#ffd400";
+      ctx.lineWidth = selected ? 3 : 3.5;
+      ctx.stroke();
+
+      this.drawCheckmark(
+        ctx,
+        btnCx,
+        btnCy,
+        btn.w,
+        selected ? "#0f1419" : "#111111"
+      );
+    }
+  }
+
+  hitTestCheckButton(displayX, displayY) {
+    for (const hoop of this.hoops) {
+      const btn = this.getCheckButtonRect(hoop);
+      const cx = btn.x + btn.w / 2;
+      const cy = btn.y + btn.h / 2;
+      const radius = btn.w / 2 + 4;
+      if ((displayX - cx) ** 2 + (displayY - cy) ** 2 <= radius ** 2) {
+        return hoop;
+      }
+    }
+    return null;
+  }
+
+  onClick(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    const displayX = event.clientX - rect.left;
+    const displayY = event.clientY - rect.top;
+
+    const checkHit = this.hitTestCheckButton(displayX, displayY);
+    if (checkHit) {
+      this.selectHoop(checkHit.id);
+      return;
+    }
+
+    const x = displayX * this.scaleX;
+    const y = displayY * this.scaleY;
+
+    let chosen = null;
+    for (const hoop of this.hoops) {
+      const pad = Math.max(18, hoop.w * 0.15);
+      if (
+        x >= hoop.x1 - pad &&
+        x <= hoop.x2 + pad &&
+        y >= hoop.y1 - pad &&
+        y <= hoop.y2 + pad
+      ) {
+        chosen = hoop;
+      }
+    }
+
+    if (!chosen) {
+      return;
+    }
+
+    this.selectHoop(chosen.id);
+  }
+
+  getSelected() {
+    return this.hoops.find((hoop) => hoop.id === this.selectedId) || null;
   }
 }
 
-async function startAnalysis() {
+function renderHoopChoiceButtons() {
+  if (!hoopChoiceButtons || !hoopPicker) {
+    return;
+  }
+
+  hoopChoiceButtons.innerHTML = "";
+  hoopPicker.hoops.forEach((hoop, index) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hoop-choice-btn";
+    if (hoop.id === hoopPicker.selectedId) {
+      btn.classList.add("is-active");
+    }
+    btn.innerHTML = `<span class="check-icon" aria-hidden="true"></span><span>篮筐 ${index + 1} · ${Math.round(hoop.conf * 100)}%</span>`;
+    btn.addEventListener("click", () => {
+      hoopPicker.selectHoop(hoop.id);
+      selectedTargetHoop = hoopPicker.getSelected();
+      confirmHoopBtn.disabled = !selectedTargetHoop;
+    });
+    hoopChoiceButtons.appendChild(btn);
+  });
+}
+
+async function openHoopPicker(scanResult) {
+  hide(errorSection);
+  hide(resultsSection);
+  hide(playerSection);
+  hide(progressSection);
+  hide(liveStats);
+  show(hoopSelectSection);
+
+  if (!hoopPicker) {
+    hoopPicker = new HoopPicker(hoopPickerCanvas);
+  }
+
+  confirmHoopBtn.disabled = true;
+  await hoopPicker.load(scanResult.preview_jpeg_base64, scanResult.hoops);
+  hoopPicker.onSelect = (hoop) => {
+    selectedTargetHoop = hoop;
+    confirmHoopBtn.disabled = false;
+    renderHoopChoiceButtons();
+  };
+  renderHoopChoiceButtons();
+
+  if (scanResult.hoops.length === 1) {
+    hoopPicker.selectHoop(scanResult.hoops[0].id);
+    selectedTargetHoop = scanResult.hoops[0];
+    confirmHoopBtn.disabled = false;
+  }
+}
+
+async function prepareOptimizedAnalysis() {
   if (!currentFile) {
     return;
   }
 
+  analyzeBtn.disabled = true;
+  analyzeBtn.textContent = "正在扫描篮筐…";
+
+  try {
+    const formData = new FormData();
+    formData.append("file", currentFile);
+    const response = await fetch("/api/detect-hoops", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "篮筐扫描失败");
+    }
+
+    if (!payload.hoops || payload.hoops.length === 0) {
+      throw new Error("未检测到篮筐，请换一段篮筐更清晰的视频");
+    }
+
+    if (payload.hoops.length === 1) {
+      selectedTargetHoop = payload.hoops[0];
+      await submitAnalysis(selectedTargetHoop);
+      return;
+    }
+
+    await openHoopPicker(payload);
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    syncAlgorithmUi();
+    analyzeBtn.disabled = false;
+  }
+}
+
+async function submitAnalysis(targetHoop = null) {
+  if (!currentFile) {
+    return;
+  }
+
+  hide(hoopSelectSection);
   hide(roiSection);
   show(playerSection);
   show(progressSection);
@@ -583,6 +939,7 @@ async function startAnalysis() {
   show(playerBadge);
   confirmRoiBtn.disabled = true;
   analyzeBtn.disabled = true;
+  confirmHoopBtn.disabled = true;
 
   const formData = new FormData();
   formData.append("file", currentFile);
@@ -592,7 +949,14 @@ async function startAnalysis() {
     formData.append("roi_x2", selectedRoi.x2);
     formData.append("roi_y2", selectedRoi.y2);
   }
-  formData.append("has_net", hasNetInput && hasNetInput.checked ? "true" : "false");
+  formData.append("has_net", "false");
+  formData.append("algorithm", getSelectedAlgorithm());
+  if (targetHoop) {
+    formData.append("target_hoop_cx", targetHoop.cx);
+    formData.append("target_hoop_cy", targetHoop.cy);
+    formData.append("target_hoop_w", targetHoop.w);
+    formData.append("target_hoop_h", targetHoop.h);
+  }
   const clipSettings = getClipSettings();
   formData.append("clip_before", clipSettings.before);
   formData.append("clip_after", clipSettings.after);
@@ -615,6 +979,43 @@ async function startAnalysis() {
     showError(error.message);
     analyzeBtn.disabled = false;
     confirmRoiBtn.disabled = false;
+    confirmHoopBtn.disabled = false;
+  }
+}
+
+async function startAnalysis() {
+  selectedRoi = null;
+  selectedTargetHoop = null;
+
+  if (getSelectedAlgorithm() === "original") {
+    await submitAnalysis(null);
+    return;
+  }
+
+  await prepareOptimizedAnalysis();
+}
+
+async function openRoiSetup() {
+  if (!currentFile) {
+    return;
+  }
+
+  hide(errorSection);
+  hide(resultsSection);
+  hide(playerSection);
+  show(roiSection);
+
+  if (!roiSelector) {
+    roiSelector = new RoiSelector(roiCanvas, roiSourceVideo);
+  }
+
+  try {
+    confirmRoiBtn.disabled = true;
+    await roiSelector.loadFile(currentFile);
+    selectedRoi = roiSelector.toNativeRect();
+    confirmRoiBtn.disabled = false;
+  } catch (error) {
+    showError(error.message);
   }
 }
 
@@ -658,14 +1059,23 @@ clearFileBtn.addEventListener("click", () => {
 });
 
 if (USE_AUTO_ROI_FOR_TEST) {
-  analyzeBtn.textContent = "开始分析（自动 ROI）";
-  analyzeBtn.addEventListener("click", () => {
-    selectedRoi = null;
-    startAnalysis();
-  });
+  analyzeBtn.addEventListener("click", startAnalysis);
 } else {
   analyzeBtn.addEventListener("click", openRoiSetup);
 }
+
+confirmHoopBtn.addEventListener("click", () => {
+  if (!selectedTargetHoop) {
+    return;
+  }
+  submitAnalysis(selectedTargetHoop);
+});
+
+cancelHoopBtn.addEventListener("click", () => {
+  hide(hoopSelectSection);
+  selectedTargetHoop = null;
+  analyzeBtn.disabled = !currentFile;
+});
 resetRoiBtn.addEventListener("click", () => {
   if (roiSelector) {
     roiSelector.reset();
@@ -778,6 +1188,11 @@ function renderResults(result, jobId) {
   statMakes.textContent = result.makes;
   statMisses.textContent = result.misses;
   statPercentage.textContent = `${result.percentage}%`;
+
+  if (algorithmBadge) {
+    algorithmBadge.textContent = `当前结果 · ${getAlgorithmLabel(result.algorithm || "optimized")}`;
+    show(algorithmBadge);
+  }
 
   hide(livePreview);
   show(resultVideo);

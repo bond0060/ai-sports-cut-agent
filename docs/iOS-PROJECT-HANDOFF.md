@@ -36,7 +36,10 @@
 |------|--------|------|
 | `best.pt` | ~6 MB | YOLOv8 权重，需转 Core ML |
 | `config.yaml` | 极小 | 类别：`Basketball`, `Basketball Hoop` |
-| `analyzer.py` | — | 主分析循环（移植核心） |
+| `analyzer.py` | — | 算法路由（原版 / 优化版） |
+| `optimized_analyzer.py` | — | **优化版（解决多篮筐检测）— iOS 移植首选** |
+| `original_analyzer.py` | — | avishah3 原版对照 |
+| `original_utils.py` | — | 原版轨迹/计分工具 |
 | `utils.py` | — | ROI、轨迹、up/down、score |
 | `net_motion.py` | — | 篮网 Swish（iOS v0.2 可选） |
 | `shot_verdict.py` | — | 延迟判定 Make/Miss（有网模式） |

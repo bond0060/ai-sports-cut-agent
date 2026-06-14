@@ -2,6 +2,34 @@ import math
 import numpy as np
 import torch
 
+# #region agent log
+import json as _json
+import time as _time
+
+_DBG_LOG_PATH = "/Users/tiancihuang/Downloads/AI-Basketball-Shot-Detection-Tracker-master/.cursor/debug-5746cf.log"
+
+
+def _dbg(hypothesis_id, location, message, data):
+    try:
+        with open(_DBG_LOG_PATH, "a") as _f:
+            _f.write(
+                _json.dumps(
+                    {
+                        "sessionId": "5746cf",
+                        "runId": "run1",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+# #endregion
+
 HOOP_ROI_X_SCALE = 3.0
 HOOP_ROI_Y_SCALE = 3.0
 HOOP_ROI_UP_EXTRA = 2.0
@@ -449,6 +477,23 @@ def clean_hoop_pos(hoop_pos, custom_roi=None):
         max_dist = 0.5 * math.sqrt(w1 ** 2 + h1 ** 2)
 
         if dist > max_dist and f_dif < 5:
+            # #region agent log
+            _dbg(
+                "C",
+                "utils.py:451",
+                "clean_hoop_pos popped latest hoop (jump guard)",
+                {
+                    "frame": f2,
+                    "dist": round(dist, 1),
+                    "max_dist": round(max_dist, 1),
+                    "f_dif": f_dif,
+                    "from_cx": x1,
+                    "from_cy": y1,
+                    "to_cx": x2,
+                    "to_cy": y2,
+                },
+            )
+            # #endregion
             hoop_pos.pop()
 
         if (w2 * 1.3 < h2) or (h2 * 1.3 < w2):

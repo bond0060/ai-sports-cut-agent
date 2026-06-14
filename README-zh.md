@@ -14,6 +14,10 @@ https://github.com/avishah3/AI-Basketball-Shot-Detector-Tracker/assets/115107522
 - [**第 1 天起步（Xcode 已装好从这里开始）**](ios-starter/START-HERE.md)
 - [iOS 工程交接文档（算法摘要、模型转换、文件清单）](docs/iOS-PROJECT-HANDOFF.md)
 
+## 版本更新记录（2026-06-14）
+- **优化版算法（解决多篮筐检测）**：保留 avishah3 原版检测与计分逻辑；当画面出现多个篮筐时，用户先选定目标篮筐区域，区域内检测均视为目标篮筐，区域外不参与统计。此版本为 Web 端验证基线，后续将移植到 iOS。
+- 新增 `original_analyzer.py` / `original_utils.py` 作为原版算法对照；`optimized_analyzer.py` 为优化版实现。
+
 ## 版本更新记录（2026-06-05）
 - 使用自动 ROI 作为检测区域，不再依赖手动框选。
 - 在多篮筐场景中自动选择画面中面积最大、最接近镜头的篮筐作为主目标，并排除其他干扰篮筐。

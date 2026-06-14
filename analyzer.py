@@ -28,8 +28,86 @@ from utils import (
     normalize_roi,
 )
 
+# #region agent log
+import json as _json
+import time as _time
+
+_DBG_LOG_PATH = "/Users/tiancihuang/Downloads/AI-Basketball-Shot-Detection-Tracker-master/.cursor/debug-5746cf.log"
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        with open(_DBG_LOG_PATH, "a") as _f:
+            _f.write(
+                _json.dumps(
+                    {
+                        "sessionId": "5746cf",
+                        "runId": "run1",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+# #endregion
+
 CLASS_NAMES = ["Basketball", "Basketball Hoop"]
 DEFAULT_MODEL = Path(__file__).resolve().parent / "best.pt"
+
+
+def _dominant_hoop(candidates: list[dict]) -> dict:
+    return max(candidates, key=lambda c: (c["w"] * c["h"] * c["conf"], c["conf"]))
+
+
+def select_locked_hoop(candidates: list[dict], lock: dict, max_miss: int) -> dict | None:
+    """Track one hoop identity across frames.
+
+    Returns the candidate chosen as the primary hoop this frame, or None when the
+    locked hoop is temporarily not visible (caller should hold the last ROI).
+    """
+    if not candidates:
+        if lock["center"] is not None:
+            lock["miss"] += 1
+        return None
+
+    if lock["center"] is None:
+        chosen = _dominant_hoop(candidates)
+        lock["center"] = chosen["center"]
+        lock["w"] = chosen["w"]
+        lock["h"] = chosen["h"]
+        lock["miss"] = 0
+        return chosen
+
+    lx, ly = lock["center"]
+    gate = max(2.5 * max(lock["w"], 1), 90)
+    nearest = min(
+        candidates,
+        key=lambda c: (c["center"][0] - lx) ** 2 + (c["center"][1] - ly) ** 2,
+    )
+    nd = ((nearest["center"][0] - lx) ** 2 + (nearest["center"][1] - ly) ** 2) ** 0.5
+
+    if nd <= gate:
+        lock["center"] = nearest["center"]
+        lock["w"] = nearest["w"]
+        lock["h"] = nearest["h"]
+        lock["miss"] = 0
+        return nearest
+
+    # Locked hoop not visible this frame: hold briefly, then re-lock to the dominant one.
+    lock["miss"] += 1
+    if lock["miss"] > max_miss:
+        chosen = _dominant_hoop(candidates)
+        lock["center"] = chosen["center"]
+        lock["w"] = chosen["w"]
+        lock["h"] = chosen["h"]
+        lock["miss"] = 0
+        return chosen
+    return None
 BALL_COLOR = (0, 0, 255)
 HOOP_COLOR = (0, 255, 255)
 ROI_COLOR = (0, 220, 255)
@@ -193,11 +271,39 @@ def analyze_video(
     *,
     custom_roi: tuple[int, int, int, int] | None = None,
     has_net: bool = True,
+    algorithm: str = "optimized",
+    target_hoop: tuple[int, int, int, int] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     frame_callback: Callable[[np.ndarray, dict], None] | None = None,
     show_gui: bool = False,
     model_path: str | Path | None = None,
 ) -> dict:
+    from original_analyzer import analyze_video_original
+    from optimized_analyzer import analyze_video_optimized
+
+    if algorithm == "original":
+        return analyze_video_original(
+            input_path,
+            output_path,
+            progress_callback=progress_callback,
+            frame_callback=frame_callback,
+            show_gui=show_gui,
+            model_path=model_path,
+        )
+
+    if algorithm == "optimized":
+        if target_hoop is None:
+            raise ValueError("Optimized mode requires a target hoop selection")
+        return analyze_video_optimized(
+            input_path,
+            output_path,
+            target_hoop=target_hoop,
+            progress_callback=progress_callback,
+            frame_callback=frame_callback,
+            show_gui=show_gui,
+            model_path=model_path,
+        )
+
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Video not found: {input_path}")
@@ -245,6 +351,8 @@ def analyze_video(
     is_shooting = False
     shooting_release_frame = -9999
     sequence_fired = False
+    hoop_lock: dict = {"center": None, "w": 0, "h": 0, "miss": 0}
+    hoop_max_miss = max(int(fps * 1.0), 10)
     def _status_overlay() -> str:
         if verdict_mgr.pending is not None:
             return "Verifying..."
@@ -303,12 +411,37 @@ def analyze_video(
                         }
                     )
 
-        # Auto-select a single primary hoop each frame: largest area with confidence weight.
-        if hoop_candidates:
-            primary_hoop = max(
-                hoop_candidates,
-                key=lambda c: (c["w"] * c["h"] * c["conf"], c["conf"]),
+        # Track a single locked hoop identity across frames (stable primary).
+        prev_hoop_center = hoop_pos[-1][0] if len(hoop_pos) > 0 else None
+        primary_hoop = select_locked_hoop(hoop_candidates, hoop_lock, hoop_max_miss)
+        if primary_hoop is not None:
+            # #region agent log
+            _chosen_c = primary_hoop["center"]
+            _jump = (
+                ((_chosen_c[0] - prev_hoop_center[0]) ** 2 + (_chosen_c[1] - prev_hoop_center[1]) ** 2) ** 0.5
+                if prev_hoop_center is not None
+                else 0.0
             )
+            if len(hoop_candidates) >= 2 or _jump > 60:
+                _dbg(
+                    "A",
+                    "analyzer.py:307",
+                    "hoop candidate selection",
+                    {
+                        "frame": frame_count,
+                        "n_candidates": len(hoop_candidates),
+                        "candidates": [
+                            {"cx": c["center"][0], "cy": c["center"][1], "area": c["w"] * c["h"], "conf": c["conf"]}
+                            for c in hoop_candidates
+                        ],
+                        "chosen_cx": _chosen_c[0],
+                        "chosen_cy": _chosen_c[1],
+                        "prev_cx": prev_hoop_center[0] if prev_hoop_center else None,
+                        "prev_cy": prev_hoop_center[1] if prev_hoop_center else None,
+                        "jump_px": round(_jump, 1),
+                    },
+                )
+            # #endregion
             hoop_pos.append(
                 (
                     primary_hoop["center"],
@@ -327,6 +460,22 @@ def analyze_video(
                 f"Hoop {primary_hoop['conf']:.0%}",
                 HOOP_COLOR,
             )
+        # #region agent log
+        elif len(hoop_pos) > 0:
+            _dbg(
+                "B",
+                "analyzer.py:330",
+                "locked hoop not visible this frame; ROI holds last position",
+                {
+                    "frame": frame_count,
+                    "n_candidates": len(hoop_candidates),
+                    "stale_cx": hoop_pos[-1][0][0],
+                    "stale_cy": hoop_pos[-1][0][1],
+                    "stale_age_frames": frame_count - hoop_pos[-1][1],
+                    "lock_miss": hoop_lock["miss"],
+                },
+            )
+        # #endregion
 
         for ball in ball_candidates:
             center = ball["center"]
@@ -488,6 +637,16 @@ def analyze_video(
         frame = _draw_hud(
             frame, makes, attempts, overlay_text, overlay_color, fade_counter, fade_frames
         )
+        cv2.putText(
+            frame,
+            "Optimized Algorithm",
+            (24, height - 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
         if fade_counter > 0:
             fade_counter -= 1
 
@@ -555,5 +714,6 @@ def analyze_video(
         },
         "custom_roi": list(custom_roi) if custom_roi else None,
         "has_net": has_net,
+        "algorithm": "optimized",
         "output_path": str(output_path) if output_path else None,
     }

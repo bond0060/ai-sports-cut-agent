@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from analyzer import analyze_video
 from clip_exporter import export_shot_clips, zip_clips
+from optimized_analyzer import scan_hoops_in_video
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -51,6 +52,8 @@ def _enqueue_job(
     filename: str,
     custom_roi: tuple[int, int, int, int] | None,
     use_net_swish: bool,
+    algorithm: str,
+    target_hoop: tuple[int, int, int, int] | None,
     clip_before_s: float,
     clip_after_s: float,
 ) -> str:
@@ -79,6 +82,8 @@ def _enqueue_job(
             output_path,
             custom_roi,
             use_net_swish,
+            algorithm,
+            target_hoop,
             clip_before_s,
             clip_after_s,
         ),
@@ -94,6 +99,8 @@ def _run_job(
     output_path: Path,
     custom_roi: tuple[int, int, int, int] | None = None,
     has_net: bool = True,
+    algorithm: str = "optimized",
+    target_hoop: tuple[int, int, int, int] | None = None,
     clip_before_s: float = 3.0,
     clip_after_s: float = 3.0,
 ) -> None:
@@ -137,6 +144,8 @@ def _run_job(
             output_path,
             custom_roi=custom_roi,
             has_net=has_net,
+            algorithm=algorithm,
+            target_hoop=target_hoop,
             progress_callback=on_progress,
             frame_callback=on_frame,
         )
@@ -172,6 +181,8 @@ def _run_job(
                         "shots": shots,
                         "video_info": result["video_info"],
                         "has_net": result.get("has_net", has_net),
+                        "algorithm": result.get("algorithm", algorithm),
+                        "target_hoop": result.get("target_hoop"),
                         "clip_before_s": clip_before_s,
                         "clip_after_s": clip_after_s,
                         "clips_zip_url": (
@@ -199,6 +210,33 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.post("/api/detect-hoops")
+async def detect_hoops(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="未选择文件")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的视频格式。请上传: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    scan_id = uuid.uuid4().hex
+    input_path = UPLOAD_DIR / f"scan_{scan_id}{suffix}"
+    with input_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        result = scan_hoops_in_video(input_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        input_path.unlink(missing_ok=True)
+
+    return result
+
+
 @app.post("/api/analyze")
 async def analyze(
     file: UploadFile = File(...),
@@ -207,6 +245,11 @@ async def analyze(
     roi_x2: Optional[float] = Form(None),
     roi_y2: Optional[float] = Form(None),
     has_net: Optional[str] = Form("true"),
+    algorithm: Optional[str] = Form("optimized"),
+    target_hoop_cx: Optional[float] = Form(None),
+    target_hoop_cy: Optional[float] = Form(None),
+    target_hoop_w: Optional[float] = Form(None),
+    target_hoop_h: Optional[float] = Form(None),
     clip_before: Optional[float] = Form(3.0),
     clip_after: Optional[float] = Form(3.0),
 ):
@@ -225,8 +268,20 @@ async def analyze(
         custom_roi = (int(roi_x1), int(roi_y1), int(roi_x2), int(roi_y2))
 
     use_net_swish = str(has_net or "true").lower() in ("true", "1", "yes", "on")
+    algorithm_mode = str(algorithm or "optimized").lower()
+    if algorithm_mode not in ("optimized", "original"):
+        algorithm_mode = "optimized"
     clip_before_s = max(0.0, float(clip_before if clip_before is not None else 3.0))
     clip_after_s = max(0.0, float(clip_after if clip_after is not None else 3.0))
+
+    target_hoop = None
+    if None not in (target_hoop_cx, target_hoop_cy, target_hoop_w, target_hoop_h):
+        target_hoop = (
+            int(target_hoop_cx),
+            int(target_hoop_cy),
+            int(target_hoop_w),
+            int(target_hoop_h),
+        )
 
     job_id = uuid.uuid4().hex
     input_path = UPLOAD_DIR / f"{job_id}{suffix}"
@@ -241,6 +296,8 @@ async def analyze(
         filename=file.filename,
         custom_roi=custom_roi,
         use_net_swish=use_net_swish,
+        algorithm=algorithm_mode,
+        target_hoop=target_hoop,
         clip_before_s=clip_before_s,
         clip_after_s=clip_after_s,
     )

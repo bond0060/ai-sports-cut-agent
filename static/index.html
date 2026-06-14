@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>篮球投篮检测</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body>
   <div class="page">
@@ -18,6 +18,28 @@
 
     <main class="layout">
       <section class="card upload-card">
+        <div class="algorithm-option">
+          <div class="algorithm-header">
+            <span class="algorithm-label">检测算法</span>
+            <span class="algorithm-badge-inline">A/B 对比</span>
+          </div>
+          <div class="algorithm-choices" role="radiogroup" aria-label="检测算法">
+            <label class="algorithm-choice is-active">
+              <input id="algorithm-optimized" name="algorithm" type="radio" value="optimized" checked />
+              <span class="algorithm-choice-title">优化版</span>
+              <span class="algorithm-choice-desc">解决多篮筐检测 · 手动选定目标区域</span>
+            </label>
+            <label class="algorithm-choice">
+              <input id="algorithm-original" name="algorithm" type="radio" value="original" />
+              <span class="algorithm-choice-title">原版</span>
+              <span class="algorithm-choice-desc">avishah3 GitHub 原始算法（检测全部篮筐）</span>
+            </label>
+          </div>
+          <p id="algorithm-hint" class="algorithm-hint muted">
+            优化版（解决多篮筐检测）：与原版检测逻辑相同；若出现多个篮筐，请先点选目标篮筐区域，该区域内检测都视为目标篮筐。
+          </p>
+        </div>
+
         <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="上传视频">
           <div class="dropzone-icon">🏀</div>
           <h2>拖拽视频到此处</h2>
@@ -31,7 +53,24 @@
           <button id="clear-file" type="button" class="text-btn">移除</button>
         </div>
 
-        <button id="analyze-btn" type="button" class="primary-btn" disabled>开始分析（自动 ROI）</button>
+        <button id="analyze-btn" type="button" class="primary-btn" disabled>开始分析（优化版）</button>
+      </section>
+
+      <section id="hoop-select-section" class="card hidden">
+        <div class="section-header">
+          <h2>选择目标篮筐区域</h2>
+        </div>
+        <p class="roi-tip">
+          检测到多个篮筐。请点击 ✓ 或下方按钮，选择你要统计的目标区域；该区域内的篮筐都会被视为目标篮筐。
+        </p>
+        <div id="hoop-choice-buttons" class="hoop-choice-buttons"></div>
+        <div id="hoop-picker" class="hoop-picker">
+          <canvas id="hoop-picker-canvas"></canvas>
+        </div>
+        <div class="roi-actions">
+          <button id="cancel-hoop-btn" type="button" class="secondary-btn">返回</button>
+          <button id="confirm-hoop-btn" type="button" class="primary-btn" disabled>确认并开始分析</button>
+        </div>
       </section>
 
       <section id="roi-section" class="card hidden">
@@ -119,6 +158,7 @@
       </section>
 
       <section id="results-section" class="results hidden">
+        <p id="algorithm-badge" class="algorithm-badge hidden"></p>
         <div class="stats-grid">
           <article class="stat-card">
             <span class="stat-label">投篮次数</span>
@@ -191,6 +231,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>
