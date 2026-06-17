@@ -280,6 +280,8 @@ def analyze_video(
 ) -> dict:
     from original_analyzer import analyze_video_original
     from optimized_analyzer import analyze_video_optimized
+    from hoopcut_analyzer import analyze_video_hoopcut
+    from swishai_analyzer import analyze_video_swishai
 
     if algorithm == "original":
         return analyze_video_original(
@@ -302,6 +304,24 @@ def analyze_video(
             frame_callback=frame_callback,
             show_gui=show_gui,
             model_path=model_path,
+        )
+
+    if algorithm == "hoopcut":
+        return analyze_video_hoopcut(
+            input_path,
+            output_path,
+            progress_callback=progress_callback,
+            frame_callback=frame_callback,
+            show_gui=show_gui,
+        )
+
+    if algorithm == "swishai":
+        return analyze_video_swishai(
+            input_path,
+            output_path,
+            progress_callback=progress_callback,
+            frame_callback=frame_callback,
+            show_gui=show_gui,
         )
 
     input_path = Path(input_path)

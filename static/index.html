@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>篮球投篮检测</title>
-  <link rel="stylesheet" href="/static/style.css?v=6" />
+  <link rel="stylesheet" href="/static/style.css?v=7" />
 </head>
 <body>
   <div class="page">
@@ -23,20 +23,30 @@
             <span class="algorithm-label">检测算法</span>
             <span class="algorithm-badge-inline">A/B 对比</span>
           </div>
-          <div class="algorithm-choices" role="radiogroup" aria-label="检测算法">
+          <div class="algorithm-choices algorithm-choices-grid" role="radiogroup" aria-label="检测算法">
             <label class="algorithm-choice is-active">
               <input id="algorithm-optimized" name="algorithm" type="radio" value="optimized" checked />
               <span class="algorithm-choice-title">优化版</span>
-              <span class="algorithm-choice-desc">解决多篮筐检测 · 手动选定目标区域</span>
+              <span class="algorithm-choice-desc">解决多篮筐 · 目标区域筛选</span>
             </label>
             <label class="algorithm-choice">
               <input id="algorithm-original" name="algorithm" type="radio" value="original" />
               <span class="algorithm-choice-title">原版</span>
-              <span class="algorithm-choice-desc">avishah3 GitHub 原始算法（检测全部篮筐）</span>
+              <span class="algorithm-choice-desc">avishah3 · 检测全部篮筐</span>
+            </label>
+            <label class="algorithm-choice">
+              <input id="algorithm-hoopcut" name="algorithm" type="radio" value="hoopcut" />
+              <span class="algorithm-choice-title">HoopCut</span>
+              <span class="algorithm-choice-desc">线性 + 抛物线双轨迹判进</span>
+            </label>
+            <label class="algorithm-choice">
+              <input id="algorithm-swishai" name="algorithm" type="radio" value="swishai" />
+              <span class="algorithm-choice-title">SwishAI</span>
+              <span class="algorithm-choice-desc">5 类 YOLO · 出手/进球冷却计分</span>
             </label>
           </div>
           <p id="algorithm-hint" class="algorithm-hint muted">
-            优化版（解决多篮筐检测）：与原版检测逻辑相同；若出现多个篮筐，请先点选目标篮筐区域，该区域内检测都视为目标篮筐。
+            优化版（解决多篮筐检测）：多个篮筐时需先选定目标区域。HoopCut / SwishAI 为上游原版逻辑，上传后直接分析，无需选框。
           </p>
         </div>
 
@@ -198,11 +208,8 @@
               <span>秒</span>
             </label>
             <p class="clip-settings-hint muted">
-              回放与导出片段均使用上述前后时长（基于标注视频）。分析完成后可单条或批量保存到本机。
+              点击表格「回放」在浏览器内跳转播放，不写入本地片段文件。
             </p>
-            <a id="download-all-clips" class="secondary-btn download-all-btn hidden" href="#" download>
-              ↓ 导出全部片段 (ZIP)
-            </a>
           </div>
           <div class="table-wrap">
             <table>
@@ -215,7 +222,6 @@
                   <th>轨迹</th>
                   <th>网动</th>
                   <th>回放</th>
-                  <th>保存</th>
                 </tr>
               </thead>
               <tbody id="shots-body"></tbody>
@@ -231,6 +237,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

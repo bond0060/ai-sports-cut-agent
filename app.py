@@ -16,7 +16,6 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from analyzer import analyze_video
-from clip_exporter import export_shot_clips, zip_clips
 from optimized_analyzer import scan_hoops_in_video
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,6 +42,10 @@ def _utc_now() -> str:
 
 def _clips_dir(job_id: str) -> Path:
     return OUTPUT_DIR / job_id / "clips"
+
+
+def _cleanup_job_upload(input_path: Path) -> None:
+    input_path.unlink(missing_ok=True)
 
 
 def _enqueue_job(
@@ -151,21 +154,6 @@ def _run_job(
         )
 
         shots = result["shots"]
-        clips_dir = _clips_dir(job_id)
-        clip_source = output_path if output_path.exists() else input_path
-        if shots and clip_source.exists():
-            shots = export_shot_clips(
-                clip_source,
-                shots,
-                clips_dir,
-                before_s=clip_before_s,
-                after_s=clip_after_s,
-            )
-            for shot in shots:
-                shot["clip_download_url"] = (
-                    f"/api/jobs/{job_id}/clips/{shot['clip_filename']}"
-                )
-            zip_clips(clips_dir, clips_dir.parent / "clips.zip")
 
         with jobs_lock:
             jobs[job_id].update(
@@ -185,9 +173,7 @@ def _run_job(
                         "target_hoop": result.get("target_hoop"),
                         "clip_before_s": clip_before_s,
                         "clip_after_s": clip_after_s,
-                        "clips_zip_url": (
-                            f"/api/jobs/{job_id}/clips.zip" if shots else None
-                        ),
+                        "clips_zip_url": None,
                         "output_url": f"/api/jobs/{job_id}/video",
                     },
                 }
@@ -203,6 +189,7 @@ def _run_job(
             )
     finally:
         preview_frames.pop(job_id, None)
+        _cleanup_job_upload(input_path)
 
 
 @app.get("/")
@@ -269,7 +256,8 @@ async def analyze(
 
     use_net_swish = str(has_net or "true").lower() in ("true", "1", "yes", "on")
     algorithm_mode = str(algorithm or "optimized").lower()
-    if algorithm_mode not in ("optimized", "original"):
+    valid_algorithms = ("optimized", "original", "hoopcut", "swishai")
+    if algorithm_mode not in valid_algorithms:
         algorithm_mode = "optimized"
     clip_before_s = max(0.0, float(clip_before if clip_before is not None else 3.0))
     clip_after_s = max(0.0, float(clip_after if clip_after is not None else 3.0))
@@ -282,6 +270,9 @@ async def analyze(
             int(target_hoop_w),
             int(target_hoop_h),
         )
+
+    if algorithm_mode == "optimized" and target_hoop is None:
+        raise HTTPException(status_code=400, detail="优化版需要先选择目标篮筐区域")
 
     job_id = uuid.uuid4().hex
     input_path = UPLOAD_DIR / f"{job_id}{suffix}"

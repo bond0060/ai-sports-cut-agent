@@ -6,6 +6,8 @@ const clearFileBtn = document.getElementById("clear-file");
 const analyzeBtn = document.getElementById("analyze-btn");
 const algorithmOptimizedInput = document.getElementById("algorithm-optimized");
 const algorithmOriginalInput = document.getElementById("algorithm-original");
+const algorithmHoopcutInput = document.getElementById("algorithm-hoopcut");
+const algorithmSwishaiInput = document.getElementById("algorithm-swishai");
 const algorithmChoices = document.querySelectorAll(".algorithm-choice");
 const algorithmHint = document.getElementById("algorithm-hint");
 const algorithmBadge = document.getElementById("algorithm-badge");
@@ -60,8 +62,6 @@ const videoDockPlaceholder = document.getElementById("video-dock-placeholder");
 const playerScrollAnchor = document.getElementById("player-scroll-anchor");
 const dockBackBtn = document.getElementById("dock-back-btn");
 const dockCloseBtn = document.getElementById("dock-close-btn");
-const downloadAllClips = document.getElementById("download-all-clips");
-
 const CLIP_SETTINGS_KEY = "basketball_clip_settings";
 const ALGORITHM_SETTINGS_KEY = "basketball_algorithm";
 const USE_AUTO_ROI_FOR_TEST = true;
@@ -221,37 +221,65 @@ function playShotClip(shot, rowEl) {
 }
 
 function getSelectedAlgorithm() {
-  return algorithmOriginalInput?.checked ? "original" : "optimized";
+  const checked = document.querySelector('input[name="algorithm"]:checked');
+  return checked?.value || "optimized";
+}
+
+function algorithmNeedsHoopScan(algorithm) {
+  return algorithm === "optimized";
 }
 
 function setSelectedAlgorithm(algorithm) {
-  const isOriginal = algorithm === "original";
-  if (algorithmOptimizedInput) {
-    algorithmOptimizedInput.checked = !isOriginal;
-  }
-  if (algorithmOriginalInput) {
-    algorithmOriginalInput.checked = isOriginal;
-  }
+  const inputs = [
+    algorithmOptimizedInput,
+    algorithmOriginalInput,
+    algorithmHoopcutInput,
+    algorithmSwishaiInput,
+  ];
+  inputs.forEach((input) => {
+    if (input) {
+      input.checked = input.value === algorithm;
+    }
+  });
   algorithmChoices.forEach((choice) => {
     const input = choice.querySelector('input[type="radio"]');
     choice.classList.toggle("is-active", Boolean(input?.checked));
   });
 }
 
+const ALGORITHM_LABELS = {
+  optimized: "优化版（解决多篮筐 · 目标区域）",
+  original: "原版（avishah3 · 全部篮筐）",
+  hoopcut: "HoopCut（线性 + 抛物线双轨迹）",
+  swishai: "SwishAI（5 类检测 + 冷却计分）",
+};
+
+const ALGORITHM_HINTS = {
+  optimized:
+    "优化版：与原版检测逻辑相同；多个篮筐时先选定目标区域，区域内检测均视为目标篮筐。",
+  original: "原版：检测画面中所有篮筐，不做目标筛选。适合与其他算法做 A/B 对比。",
+  hoopcut:
+    "HoopCut（ericbh22 原版）：开头自动检测篮筐，线性 + 抛物线双轨迹判进，无需手动选框。",
+  swishai:
+    "SwishAI（sPappalard 原版）：5 类 YOLO 检测 + 冷却计分，无需手动选框。",
+};
+
+const ALGORITHM_BUTTONS = {
+  optimized: "开始分析（优化版）",
+  original: "开始分析（原版）",
+  hoopcut: "开始分析（HoopCut）",
+  swishai: "开始分析（SwishAI）",
+};
+
 function getAlgorithmLabel(algorithm) {
-  return algorithm === "original"
-    ? "原版算法（avishah3 GitHub · 检测全部篮筐）"
-    : "优化版算法（解决多篮筐检测 · 目标区域筛选）";
+  return ALGORITHM_LABELS[algorithm] || ALGORITHM_LABELS.optimized;
 }
 
 function syncAlgorithmUi() {
   const algorithm = getSelectedAlgorithm();
-  const isOriginal = algorithm === "original";
 
   if (algorithmHint) {
-    algorithmHint.textContent = isOriginal
-      ? "原版：检测画面中所有篮筐，不做目标筛选。适合与优化版做 A/B 对比。"
-      : "优化版（解决多篮筐检测）：与原版检测逻辑相同；多个篮筐时先选定目标区域，区域内检测均视为目标篮筐。";
+    algorithmHint.textContent = ALGORITHM_HINTS[algorithm] || ALGORITHM_HINTS.optimized;
   }
 
   if (hasNetInput) {
@@ -259,13 +287,13 @@ function syncAlgorithmUi() {
     hasNetInput.closest(".net-option")?.classList.add("disabled-option");
   }
 
-  analyzeBtn.textContent = isOriginal ? "开始分析（原版算法）" : "开始分析（优化版）";
+  analyzeBtn.textContent = ALGORITHM_BUTTONS[algorithm] || ALGORITHM_BUTTONS.optimized;
 }
 
 function loadAlgorithmSetting() {
   try {
     const saved = localStorage.getItem(ALGORITHM_SETTINGS_KEY);
-    if (saved === "original" || saved === "optimized") {
+    if (saved && ALGORITHM_LABELS[saved]) {
       setSelectedAlgorithm(saved);
     }
   } catch {
@@ -337,7 +365,6 @@ function resetUI() {
   selectedTargetHoop = null;
   currentResult = null;
   currentJobId = null;
-  hide(downloadAllClips);
   hide(algorithmBadge);
   teardownVideoDockObserver();
   setVideoFloating(false);
@@ -885,11 +912,12 @@ async function openHoopPicker(scanResult) {
   }
 }
 
-async function prepareOptimizedAnalysis() {
+async function prepareTargetHoopAnalysis() {
   if (!currentFile) {
     return;
   }
 
+  const algorithm = getSelectedAlgorithm();
   analyzeBtn.disabled = true;
   analyzeBtn.textContent = "正在扫描篮筐…";
 
@@ -906,7 +934,11 @@ async function prepareOptimizedAnalysis() {
     }
 
     if (!payload.hoops || payload.hoops.length === 0) {
-      throw new Error("未检测到篮筐，请换一段篮筐更清晰的视频");
+      if (algorithm === "optimized") {
+        throw new Error("未检测到篮筐，请换一段篮筐更清晰的视频");
+      }
+      await submitAnalysis(null);
+      return;
     }
 
     if (payload.hoops.length === 1) {
@@ -987,12 +1019,13 @@ async function startAnalysis() {
   selectedRoi = null;
   selectedTargetHoop = null;
 
-  if (getSelectedAlgorithm() === "original") {
+  const algorithm = getSelectedAlgorithm();
+  if (algorithm === "original" || algorithm === "hoopcut" || algorithm === "swishai") {
     await submitAnalysis(null);
     return;
   }
 
-  await prepareOptimizedAnalysis();
+  await prepareTargetHoopAnalysis();
 }
 
 async function openRoiSetup() {
@@ -1205,20 +1238,11 @@ function renderResults(result, jobId) {
   if (!result.shots.length) {
     show(emptyShots);
     shotCount.textContent = "0 次投篮";
-    hide(downloadAllClips);
     return;
   }
 
   hide(emptyShots);
   shotCount.textContent = `${result.shots.length} 次投篮`;
-
-  if (result.clips_zip_url) {
-    downloadAllClips.href = `${result.clips_zip_url}?t=${Date.now()}`;
-    downloadAllClips.download = `shots_${currentJobId || "export"}.zip`;
-    show(downloadAllClips);
-  } else {
-    hide(downloadAllClips);
-  }
 
   for (const shot of result.shots) {
     const row = document.createElement("tr");
@@ -1228,10 +1252,6 @@ function renderResults(result, jobId) {
     const traj = shot.trajectory_cross ? "✓" : "—";
     const net = shot.net_swish ? "✓" : "—";
 
-    const saveCell = shot.clip_download_url
-      ? `<a class="save-btn ${resultClass === "miss" ? "miss-save" : ""}" href="${shot.clip_download_url}" download="${shot.clip_filename || ""}">↓ 保存</a>`
-      : `<span class="muted">—</span>`;
-
     row.innerHTML = `
       <td>${shot.attempt}</td>
       <td>${shot.time_s}s</td>
@@ -1240,7 +1260,6 @@ function renderResults(result, jobId) {
       <td>${traj}</td>
       <td>${net}</td>
       <td><button type="button" class="play-btn">▶ 回放</button></td>
-      <td>${saveCell}</td>
     `;
 
     const playBtn = row.querySelector(".play-btn");

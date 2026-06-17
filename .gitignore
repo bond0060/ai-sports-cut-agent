@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 
 .venv/
+vendor/
+models/swishai/*.mlpackage
+models/swishai/SwishAI.mlpackage
